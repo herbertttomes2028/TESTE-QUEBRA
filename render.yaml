@@ -1,0 +1,10 @@
+# Opcional: permite criar o serviço no Render com "New + > Blueprint".
+# Se preferir o caminho manual (descrito no README), ignore este arquivo.
+services:
+  - type: web
+    name: quebra-cabeca-a-dois
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
