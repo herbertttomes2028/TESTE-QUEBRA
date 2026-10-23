@@ -18,20 +18,58 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const IMG_DIR = path.join(PUBLIC_DIR, 'imagens');
 
 /* ---------- Configuração do tabuleiro (unidades lógicas) ---------- */
-const CFG = {
-  COLS: 3,          // colunas do quebra-cabeça
-  ROWS: 4,          // linhas do quebra-cabeça (imagem em formato 3:4)
-  TILE: 200,        // tamanho de cada peça
-  FIELD_W: 1000,    // largura da área de jogo
-  FIELD_H: 1500,    // altura da área de jogo
-  BOARD_X: 200,     // posição do tabuleiro dentro da área de jogo
-  BOARD_Y: 40,
-  SNAP: 70,         // distância (em unidades) para a peça encaixar
-  MAX_ROT: 3        // giros permitidos por peça antes de "passar a vez"
-};
-const TOTAL = CFG.COLS * CFG.ROWS;
+const FIELD_W = 1000;   // largura da área de jogo
+const BOARD_W = 600;    // largura do tabuleiro
+const BOARD_X = 200;    // posição do tabuleiro dentro da área de jogo
+const BOARD_Y = 40;
+const MAX_ROT = 3;      // giros permitidos por peça antes de "passar a vez"
+const HINTS = 3;        // vezes que cada jogador pode ver a imagem completa
+const MAX_NAME = 12;
+
+// Quantidades de peças disponíveis (cols × rows). As peças são sempre quadradas;
+// a imagem é recortada no centro para caber na proporção da grade.
+const PRESETS = [
+  { pieces: 6,  cols: 2, rows: 3, label: 'Bem fácil' },
+  { pieces: 12, cols: 3, rows: 4, label: 'Fácil' },
+  { pieces: 20, cols: 4, rows: 5, label: 'Médio' },
+  { pieces: 30, cols: 5, rows: 6, label: 'Difícil' },
+  { pieces: 48, cols: 6, rows: 8, label: 'Desafio' }
+];
+const DEFAULT_PIECES = 12;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sem O/0/I/1 para não confundir
 const MAX_IMAGES = 12;
+
+function validPieces(n, fallback) {
+  n = Number(n);
+  return PRESETS.some((p) => p.pieces === n) ? n : fallback;
+}
+
+// calcula o desenho do campo para a quantidade de peças escolhida
+function layoutFor(pieces) {
+  const pr = PRESETS.find((p) => p.pieces === pieces) || PRESETS.find((p) => p.pieces === DEFAULT_PIECES);
+  const tile = BOARD_W / pr.cols;
+  const perRow = Math.max(1, Math.floor(FIELD_W / tile));
+  const trayRows = Math.ceil(pr.pieces / perRow);
+  const pitch = Math.round(tile * 0.95);
+  const trayTop = BOARD_Y + pr.rows * tile + 50;
+  return {
+    PIECES: pr.pieces,
+    COLS: pr.cols,
+    ROWS: pr.rows,
+    TILE: tile,
+    FIELD_W,
+    FIELD_H: Math.round(trayTop + (trayRows - 1) * pitch + tile + 30),
+    BOARD_X,
+    BOARD_Y,
+    SNAP: Math.round(tile * 0.35), // distância para a peça encaixar
+    MAX_ROT,
+    HINTS,
+    TRAY_TOP: trayTop,
+    PER_ROW: perRow,
+    TRAY_ROWS: trayRows,
+    PITCH: pitch
+  };
+}
 
 /* ---------- Servidor HTTP ---------- */
 const app = express();
@@ -39,9 +77,9 @@ app.disable('x-powered-by');
 
 app.get('/health', (req, res) => res.type('text').send('ok'));
 
-app.get('/api/imagens', (req, res) => {
+app.get('/api/config', (req, res) => {
   res.set('Cache-Control', 'no-cache');
-  res.json(listImages());
+  res.json({ images: listImages(), presets: PRESETS, defaultPieces: DEFAULT_PIECES, hints: HINTS, maxName: MAX_NAME });
 });
 
 app.use(
@@ -61,9 +99,22 @@ const io = new Server(server, {
 });
 
 /* ---------- Imagens ---------- */
+const SMALL_WORDS = new Set(['e', 'de', 'do', 'da', 'dos', 'das', 'a', 'o', 'com']);
 function prettyName(file) {
   const base = file.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ').replace(/([A-Za-zÀ-ÿ])(\d)/g, '$1 $2').trim();
-  return base ? base.charAt(0).toUpperCase() + base.slice(1) : file;
+  if (!base) return file;
+  return base
+    .split(/\s+/)
+    .map((w, i) => (i > 0 && SMALL_WORDS.has(w.toLowerCase()) ? w.toLowerCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+function cleanName(n) {
+  return String(n == null ? '' : n)
+    .replace(/[\u0000-\u001f\u007f<>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_NAME);
 }
 
 function listImages() {
@@ -116,20 +167,27 @@ function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
 }
 
-function buildPieces() {
-  // 15 posições na bandeja (embaixo do tabuleiro); 12 são sorteadas
+function buildPieces(cfg) {
+  const total = cfg.COLS * cfg.ROWS;
+  // posições da bandeja (embaixo do tabuleiro), espalhadas na largura toda
   const slots = [];
-  for (let r = 0; r < 3; r++) for (let c = 0; c < 5; c++) slots.push({ x: c * 200, y: 900 + r * 185 });
+  for (let r = 0; r < cfg.TRAY_ROWS; r++) {
+    for (let c = 0; c < cfg.PER_ROW; c++) {
+      const x = cfg.PER_ROW > 1 ? Math.round((c * (cfg.FIELD_W - cfg.TILE)) / (cfg.PER_ROW - 1)) : Math.round((cfg.FIELD_W - cfg.TILE) / 2);
+      slots.push({ x, y: cfg.TRAY_TOP + r * cfg.PITCH });
+    }
+  }
   shuffle(slots);
+  const jit = Math.max(4, Math.round(cfg.TILE * 0.05));
   const pieces = [];
-  for (let id = 0; id < TOTAL; id++) {
-    const s = slots[id];
+  for (let id = 0; id < total; id++) {
+    const sl = slots[id];
     pieces.push({
       id,
-      col: id % CFG.COLS,
-      row: Math.floor(id / CFG.COLS),
-      x: clamp(s.x + rnd(-10, 10), 0, CFG.FIELD_W - CFG.TILE),
-      y: clamp(s.y + rnd(-8, 8), 0, CFG.FIELD_H - CFG.TILE),
+      col: id % cfg.COLS,
+      row: Math.floor(id / cfg.COLS),
+      x: clamp(sl.x + rnd(-jit, jit), 0, cfg.FIELD_W - cfg.TILE),
+      y: clamp(sl.y + rnd(-jit, jit), 0, cfg.FIELD_H - cfg.TILE),
       rot: rnd(0, 3),   // 0 = certa; cada giro é 90° no sentido horário
       rotUsed: 0,
       heldBy: null,     // índice do jogador que está segurando
@@ -141,11 +199,14 @@ function buildPieces() {
   return pieces;
 }
 
-function createRoom(code, imageId) {
+function createRoom(code, imageId, pieces) {
   const now = Date.now();
+  const cfg = layoutFor(pieces);
   return {
     code,
     imageId,
+    cfg,
+    hints: [HINTS, HINTS],
     status: 'waiting', // waiting | playing | won
     createdAt: now,
     lastActive: now,
@@ -153,8 +214,8 @@ function createRoom(code, imageId) {
     startedAt: null,
     finishedAt: null,
     z: 100,
-    pieces: buildPieces(),
-    players: [null, null] // { pid, socketId, connected }
+    pieces: buildPieces(cfg),
+    players: [null, null] // { pid, socketId, connected, name }
   };
 }
 
@@ -178,7 +239,7 @@ function lockedTotal(room) {
 }
 
 function playersInfo(room) {
-  return room.players.map((p, idx) => ({ idx, joined: !!p, connected: !!(p && p.connected) }));
+  return room.players.map((p, idx) => ({ idx, joined: !!p, connected: !!(p && p.connected), name: p ? p.name : '' }));
 }
 
 function meta(room) {
@@ -187,7 +248,9 @@ function meta(room) {
     players: playersInfo(room),
     elapsedMs: elapsed(room),
     counts: counts(room),
-    locked: lockedTotal(room)
+    locked: lockedTotal(room),
+    total: room.pieces.length,
+    hints: room.hints
   };
 }
 
@@ -196,7 +259,7 @@ function snapshot(room) {
     {
       code: room.code,
       imageId: room.imageId,
-      total: TOTAL,
+      cfg: room.cfg,
       pieces: room.pieces.map((p) => ({
         id: p.id,
         col: p.col,
@@ -230,7 +293,7 @@ function releaseHeldBy(room, idx, exceptId) {
   for (const p of room.pieces) {
     if (p.heldBy === idx && p.id !== exceptId) {
       p.heldBy = null;
-      if (p.rotUsed >= CFG.MAX_ROT) p.rotUsed = 0; // "passou a vez": giros renovados
+      if (p.rotUsed >= MAX_ROT) p.rotUsed = 0; // "passou a vez": giros renovados
       io.to(room.code).emit('released', { id: p.id, by: idx, x: Math.round(p.x), y: Math.round(p.y), rotUsed: p.rotUsed });
     }
   }
@@ -238,10 +301,11 @@ function releaseHeldBy(room, idx, exceptId) {
 
 // tenta encaixar a peça; devolve true se travou
 function tryLock(room, p, idx) {
-  const tx = CFG.BOARD_X + p.col * CFG.TILE;
-  const ty = CFG.BOARD_Y + p.row * CFG.TILE;
+  const cfg = room.cfg;
+  const tx = cfg.BOARD_X + p.col * cfg.TILE;
+  const ty = cfg.BOARD_Y + p.row * cfg.TILE;
   if (p.rot !== 0) return false;
-  if (Math.hypot(p.x - tx, p.y - ty) > CFG.SNAP) return false;
+  if (Math.hypot(p.x - tx, p.y - ty) > cfg.SNAP) return false;
 
   p.x = tx;
   p.y = ty;
@@ -251,7 +315,7 @@ function tryLock(room, p, idx) {
   p.z = 1;
   io.to(room.code).emit('locked', { id: p.id, x: tx, y: ty, by: idx, counts: counts(room), locked: lockedTotal(room) });
 
-  if (lockedTotal(room) === TOTAL) {
+  if (lockedTotal(room) === room.pieces.length) {
     room.status = 'won';
     if (!room.startedAt) room.startedAt = room.roundStart;
     room.finishedAt = Date.now();
@@ -275,7 +339,7 @@ function ctx(socket) {
 
 function pieceFrom(room, id) {
   id = Number(id);
-  if (!Number.isInteger(id) || id < 0 || id >= TOTAL) return null;
+  if (!Number.isInteger(id) || id < 0 || id >= room.pieces.length) return null;
   return room.pieces[id];
 }
 
@@ -288,7 +352,7 @@ function cleanPid(pid) {
 }
 
 // coloca o socket dentro da sala (novo jogador, reconexão ou vaga de quem saiu)
-function attach(room, socket, pid) {
+function attach(room, socket, pid, name) {
   let idx = room.players.findIndex((p) => p && p.pid === pid);
   if (idx === -1) {
     idx = room.players.findIndex((p) => !p);
@@ -304,7 +368,8 @@ function attach(room, socket, pid) {
       oldSocket.leave(room.code);
     }
   }
-  room.players[idx] = { pid, socketId: socket.id, connected: true };
+  const prevName = old && old.pid === pid ? old.name : '';
+  room.players[idx] = { pid, socketId: socket.id, connected: true, name: cleanName(name) || prevName || 'Jogador ' + (idx + 1) };
   socket.data.code = room.code;
   socket.data.idx = idx;
   socket.join(room.code);
@@ -345,10 +410,10 @@ io.on('connection', (socket) => {
     if (!code) return reply(cb, { ok: false, error: 'busy' });
 
     leaveCurrent(socket);
-    const room = createRoom(code, imageId);
+    const room = createRoom(code, imageId, validPieces(data.pieces, DEFAULT_PIECES));
     rooms.set(code, room);
-    const res = attach(room, socket, pid);
-    reply(cb, { ok: true, idx: res.idx, cfg: CFG, snapshot: snapshot(room) });
+    const res = attach(room, socket, pid, data.name);
+    reply(cb, { ok: true, idx: res.idx, snapshot: snapshot(room) });
     broadcastMeta(room);
   });
 
@@ -361,9 +426,9 @@ io.on('connection', (socket) => {
     if (!room) return reply(cb, { ok: false, error: 'notfound' });
 
     if (socket.data.code && socket.data.code !== code) leaveCurrent(socket);
-    const res = attach(room, socket, pid);
+    const res = attach(room, socket, pid, data.name);
     if (res.error) return reply(cb, { ok: false, error: res.error });
-    reply(cb, { ok: true, idx: res.idx, cfg: CFG, snapshot: snapshot(room) });
+    reply(cb, { ok: true, idx: res.idx, snapshot: snapshot(room) });
     broadcastMeta(room);
   });
 
@@ -391,8 +456,8 @@ io.on('connection', (socket) => {
     socket.data.lastMove = now;
     const p = pieceFrom(c.room, data.id);
     if (!p || p.heldBy !== c.idx) return;
-    p.x = clamp(data.x, 0, CFG.FIELD_W - CFG.TILE);
-    p.y = clamp(data.y, 0, CFG.FIELD_H - CFG.TILE);
+    p.x = clamp(data.x, 0, c.room.cfg.FIELD_W - c.room.cfg.TILE);
+    p.y = clamp(data.y, 0, c.room.cfg.FIELD_H - c.room.cfg.TILE);
     socket.to(c.room.code).volatile.emit('moved', { id: p.id, x: Math.round(p.x), y: Math.round(p.y) });
   });
 
@@ -402,7 +467,7 @@ io.on('connection', (socket) => {
     const { room, idx } = c;
     const p = pieceFrom(room, data.id);
     if (!p || p.heldBy !== idx || p.locked) return;
-    if (p.rotUsed >= CFG.MAX_ROT) {
+    if (p.rotUsed >= MAX_ROT) {
       socket.emit('rotated', { id: p.id, rot: p.rot, rotUsed: p.rotUsed }); // só para sincronizar
       return;
     }
@@ -419,11 +484,11 @@ io.on('connection', (socket) => {
     const { room, idx } = c;
     const p = pieceFrom(room, data.id);
     if (!p || p.heldBy !== idx || p.locked) return;
-    p.x = clamp(data.x, 0, CFG.FIELD_W - CFG.TILE);
-    p.y = clamp(data.y, 0, CFG.FIELD_H - CFG.TILE);
+    p.x = clamp(data.x, 0, room.cfg.FIELD_W - room.cfg.TILE);
+    p.y = clamp(data.y, 0, room.cfg.FIELD_H - room.cfg.TILE);
     if (tryLock(room, p, idx)) return;
     p.heldBy = null;
-    if (p.rotUsed >= CFG.MAX_ROT) p.rotUsed = 0;
+    if (p.rotUsed >= MAX_ROT) p.rotUsed = 0;
     io.to(room.code).emit('released', { id: p.id, by: idx, x: Math.round(p.x), y: Math.round(p.y), rotUsed: p.rotUsed });
   });
 
@@ -433,7 +498,9 @@ io.on('connection', (socket) => {
     const { room } = c;
     const imageId = validImage(data && data.imageId) || room.imageId;
     room.imageId = imageId;
-    room.pieces = buildPieces();
+    room.cfg = layoutFor(validPieces(data && data.pieces, room.cfg.PIECES));
+    room.pieces = buildPieces(room.cfg);
+    room.hints = [HINTS, HINTS];
     room.z = 100;
     room.finishedAt = null;
     room.roundStart = Date.now();
@@ -442,6 +509,18 @@ io.on('connection', (socket) => {
     startIfReady(room);
     io.to(room.code).emit('state', snapshot(room));
     reply(cb, { ok: true });
+  });
+
+  // 💡 ver a imagem completa: cada jogador tem HINTS usos por partida (controlado aqui,
+  // para não "renovar" recarregando a página)
+  socket.on('hint', (data, cb) => {
+    const c = ctx(socket);
+    if (!c) return reply(cb, { ok: false, left: 0 });
+    const { room, idx } = c;
+    if (room.hints[idx] <= 0) return reply(cb, { ok: false, left: 0 });
+    room.hints[idx]--;
+    reply(cb, { ok: true, left: room.hints[idx] });
+    socket.emit('meta', meta(room));
   });
 
   socket.on('disconnect', () => leaveCurrent(socket));

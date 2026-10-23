@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#e9edff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Quebra-Cabeça a Dois</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%A9%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ========== INÍCIO ========== -->
+    <section id="screen-home" class="screen active">
+      <div class="home-inner">
+        <div class="logo" aria-hidden="true">
+          <span class="lg a"></span><span class="lg b"></span>
+          <span class="lg c"></span><span class="lg d"></span>
+        </div>
+        <h1>Quebra‑cabeça<br>a dois</h1>
+        <p class="lead">Cada um no seu celular, montando a mesma imagem ao mesmo tempo.</p>
+
+        <div class="name-card">
+          <label for="input-name">Seu nome</label>
+          <input id="input-name" type="text" maxlength="12" autocomplete="nickname" autocapitalize="words"
+                 spellcheck="false" placeholder="Como você se chama?" aria-label="Seu nome">
+        </div>
+        <p id="home-invite" class="invite" hidden></p>
+
+        <button id="btn-create" class="btn btn-primary btn-xl" type="button">Criar partida</button>
+
+        <div class="join-card">
+          <label for="input-code">Já tem um código?</label>
+          <div class="join-row">
+            <input id="input-code" type="text" inputmode="text" autocomplete="off" autocapitalize="characters"
+                   autocorrect="off" spellcheck="false" maxlength="4" placeholder="ABCD" aria-label="Código da sala">
+            <button id="btn-join" class="btn btn-secondary" type="button">Entrar</button>
+          </div>
+          <p id="home-error" class="error" role="alert" hidden></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== ESCOLHA DA IMAGEM ========== -->
+    <section id="screen-pick" class="screen">
+      <div class="pick-inner">
+        <button id="btn-pick-back" class="btn btn-ghost" type="button">‹ Voltar</button>
+        <h2 id="pick-title">Escolha a imagem</h2>
+        <p class="lead small">Seu amigo vai montar a mesma imagem que você escolher.</p>
+        <div id="pick-grid" class="pick-grid" role="listbox" aria-label="Imagens disponíveis"></div>
+
+        <h3 class="pick-sub">Quantas peças?</h3>
+        <div id="size-grid" class="size-grid" role="radiogroup" aria-label="Quantidade de peças"></div>
+        <p id="size-note" class="size-note"></p>
+
+        <button id="btn-pick-go" class="btn btn-primary btn-xl" type="button" disabled>Criar partida</button>
+        <p id="pick-error" class="error" role="alert" hidden></p>
+      </div>
+    </section>
+
+    <!-- ========== JOGO ========== -->
+    <section id="screen-game" class="screen">
+      <header class="hud">
+        <div class="hud-time" aria-label="Tempo"><span class="hud-icon" aria-hidden="true">⏱</span><span id="hud-time">00:00</span></div>
+        <div class="hud-progress">
+          <div class="bar-row" aria-label="Progresso">
+            <div class="bar"><div id="hud-bar" class="bar-fill"></div></div>
+            <span id="hud-count">0/12</span>
+          </div>
+          <div class="hud-players">
+            <span id="chip-me" class="chip"><i class="dot"></i><span class="chip-name">Você</span></span>
+            <span id="chip-friend" class="chip off"><i class="dot"></i><span class="chip-name">Aguardando…</span></span>
+          </div>
+        </div>
+        <button id="btn-menu" class="icon-btn" type="button" aria-label="Menu">☰</button>
+      </header>
+
+      <div id="banner-wait" class="banner" hidden>
+        <div class="banner-text">
+          <span>Código da sala</span>
+          <strong id="room-code">----</strong>
+        </div>
+        <div class="banner-actions">
+          <button id="btn-share" class="btn btn-small btn-primary" type="button">Convidar</button>
+          <button id="btn-whats" class="btn btn-small btn-secondary" type="button">WhatsApp</button>
+        </div>
+      </div>
+      <div id="banner-conn" class="banner warn" hidden>Reconectando…</div>
+
+      <div id="hint-view" class="hint-view" hidden>
+        <div class="hint-card">
+          <div id="hint-img" role="img" aria-label="Imagem completa do quebra-cabeça"></div>
+          <div class="hint-timer"><i id="hint-bar"></i></div>
+          <p id="hint-left">Toque para fechar</p>
+        </div>
+      </div>
+
+      <main id="stage">
+        <div id="fieldWrap">
+          <div id="field"></div>
+        </div>
+      </main>
+
+      <footer class="actions">
+        <p id="hint" class="hint">Arraste uma peça até o tabuleiro. Toque nela para girar.</p>
+        <div class="actions-row">
+          <button id="btn-rotate" class="btn btn-primary btn-big" type="button" disabled>↻ Girar</button>
+          <button id="btn-hint" class="btn btn-secondary btn-big btn-hint" type="button" aria-label="Dica: ver a imagem completa">
+            <span class="bulb" aria-hidden="true">💡</span> Dica <span id="hint-badge" class="badge">3</span>
+          </button>
+        </div>
+      </footer>
+    </section>
+
+    <!-- ========== MENU ========== -->
+    <div id="modal-menu" class="modal" hidden>
+      <div class="sheet">
+        <h3>Menu</h3>
+        <button id="menu-copy" class="btn btn-secondary btn-block" type="button">Copiar link da sala</button>
+        <button id="menu-change" class="btn btn-secondary btn-block" type="button">Trocar imagem ou peças</button>
+        <button id="menu-restart" class="btn btn-secondary btn-block" type="button">Recomeçar esta imagem</button>
+        <button id="menu-leave" class="btn btn-ghost btn-block" type="button">Sair da partida</button>
+        <button id="menu-close" class="btn btn-primary btn-block" type="button">Continuar jogando</button>
+      </div>
+    </div>
+
+    <!-- ========== VITÓRIA ========== -->
+    <div id="modal-win" class="modal" hidden>
+      <div id="confetti" aria-hidden="true"></div>
+      <div class="sheet win">
+        <div class="win-emoji" aria-hidden="true">🎉</div>
+        <h3>Vocês conseguiram!</h3>
+        <p class="win-time">Tempo: <strong id="win-time">00:00</strong></p>
+        <div class="win-split">
+          <span class="chip big me"><i class="dot"></i><span id="win-me-name" class="chip-name">Você</span> · <b id="win-me">0</b> peças</span>
+          <span class="chip big friend"><i class="dot"></i><span id="win-friend-name" class="chip-name">Amigo</span> · <b id="win-friend">0</b> peças</span>
+        </div>
+        <button id="win-again" class="btn btn-primary btn-block" type="button">Jogar de novo</button>
+        <button id="win-change" class="btn btn-secondary btn-block" type="button">Trocar imagem ou peças</button>
+      </div>
+    </div>
+
+    <!-- ========== CARREGANDO / AVISOS ========== -->
+    <div id="loading" class="loading" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="loading-text">Preparando as peças…</p>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
